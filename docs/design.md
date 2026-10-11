@@ -225,7 +225,7 @@ configured_cap    = min(memory_capacity, max_seqs)                 (max_seqs가 
 
 ### 6.1 GPU 사양 (`gpus.py`)
 
-vramcalc 테이블의 각 GPU에 `bandwidth_gbs`와 `bf16_tflops`를 추가합니다. 예: RTX 3090 936 / 71, RTX 3090 Ti 1008 / 80, RTX 4090 1008 / 165, A6000 768 / 155, A100 80GB 2039 / 312, H100 80GB 3350 / 989, L4 300 / 121, L40S 864 / 362. 이름 해석은 `vramcalc.gpus.lookup`을 쓰고 두 열은 servcalc의 dict에서 가져옵니다. 문자열 이름 또는 `GpuSpec`만 받으며 숫자 GB는 `ValueError`로 거부합니다(대역폭과 TFLOPs 없이는 시간을 낼 수 없음).
+vramcalc 테이블의 각 GPU에 `bandwidth_gbs`와 `bf16_tflops`를 추가합니다(vramcalc 0.1.2에서 RTX A6000, RTX 6000 Ada, A800, H800 추가). T4와 V100은 bf16이 없어 fp16 tensor 피크를 쓰며 테이블 주석에 표기합니다. 예: RTX 3090 936 / 71, RTX 3090 Ti 1008 / 80, RTX 4090 1008 / 165, A6000 768 / 155, A100 80GB 2039 / 312, H100 80GB 3350 / 989, L4 300 / 121, L40S 864 / 362. 이름 해석은 `vramcalc.gpus.lookup`을 쓰고 두 열은 servcalc의 dict에서 가져옵니다. 문자열 이름 또는 `GpuSpec`만 받으며 숫자 GB는 `ValueError`로 거부합니다(대역폭과 TFLOPs 없이는 시간을 낼 수 없음).
 
 ### 6.2 시간 변환
 
@@ -298,8 +298,8 @@ step 종류 두 가지:
                                         flops = s_d.flops + 2 × P_body × C + 4 × L × q × (C × c₀ + C × (C + 1) / 2) + (마지막 조각이면 2 × V × h)
   각각 step_ms = max(t_mem, t_comp) + overhead
 
-ITL   = f × s_mix(c, I / 2) + (1 − f) × s_d          # 빈도 가중 평균. 대표 조각은 크기 c, 이전 컨텍스트 평균 I/2
-TTFT  = Σ_{j=0}^{k−1} s_mix(C_j, j × c),  C_j = min(c, I − j × c)     # 요청이 예산을 혼자 쓸 때. 대기열 제외
+TTFT  = Σ_{j=0}^{k−1} s_mix(C_j, j × c, last_j),  C_j = min(c, I − j × c)   # 요청이 예산을 혼자 쓸 때. 대기열 제외
+ITL   = f × (TTFT / k) + (1 − f) × s_d                                        # 빈도 가중 평균. prefill이 섞인 step의 대표값은 실제 조각 step들의 평균
 ```
 
 `c ≤ 0`(N ≥ B)이면 prefill을 표현할 수 없으므로 `ttft_ms = None`, `itl_ms = s_d`, `feasible = False`.
@@ -368,9 +368,9 @@ servcalc gpus
 | `usable ≤ 0` (가중치가 예산 초과) | `DoesNotFitError` (ValueError 하위), exit 1 |
 | `gpu`가 숫자 또는 모르는 이름 | `ValueError` / `KeyError`(vramcalc 후보 안내) |
 | 모르는 프로필 이름, 모르는 `quant` | `KeyError` / `ValueError`, 내장 목록 안내 |
-| `prompt_len`, concurrency 값, `kv_block`, `token_budget`, `max_seqs`가 양의 정수가 아님, `gen_len < 2` | `ValueError` |
+| `prompt_len`, concurrency 값, `token_budget`, `max_seqs`가 양의 정수가 아님, `kv_block`이 음수, `gen_len < 2` | `ValueError` |
 | `kv_bits`가 8, 16 밖 | `ValueError` |
-| `memory_budget_ratio`, `workspace_ratio`가 (0, 1] 밖이거나 합이 1 초과 | `ValueError` |
+| `memory_budget_ratio`, `workspace_ratio`가 (0, 1] 밖이거나 `workspace_ratio ≥ memory_budget_ratio` | `ValueError` |
 | `GpuSpec` 필드가 양수가 아님, Curve x가 오름차순이 아니거나 low ≤ mid ≤ high 위반 | `ValueError` |
 | `kv_prealloc_ctx < I + O` | `ValueError` (잘림 미지원) |
 | `token_budget ≤ 1` (decode 1개 + prefill 최소 1토큰 불가) | `ValueError` |
