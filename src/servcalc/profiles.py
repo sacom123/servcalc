@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 
 from . import quant as _quant
@@ -53,3 +54,75 @@ class EngineProfile:
     @property
     def weight_bits(self) -> float:
         return _quant.bits(self.quant)
+
+
+def _cal(engine: str, quant_name: str | None) -> str:
+    return f"{engine}_{_quant.curve_suffix(quant_name)}"
+
+
+def vllm(chunked: bool = True, **overrides) -> EngineProfile:
+    """vLLM 0.6.3. Chunked prefill with a 512-token budget that includes decode tokens."""
+    quant_name = overrides.pop("quant", None)
+    fields = {
+        "name": "vllm", "version": "0.6.3", "batching": "continuous", "max_seqs": 256,
+        "quant": quant_name, "kv_bits": 16, "kv_block": 16, "kv_prealloc_ctx": None,
+        "memory_budget_ratio": 0.90, "workspace_ratio": 0.05,
+        "token_budget": 512 if chunked else None, "mixes_prefill": chunked, "kv_realloc": False,
+        "calibration": _cal("vllm", quant_name),
+    }
+    return EngineProfile(**{**fields, **overrides})
+
+
+def ollama(num_parallel: int = 4, num_ctx: int = 2048, quant: str | None = "gguf_q4_k_m",
+           **overrides) -> EngineProfile:
+    """ollama 0.5.x (llama.cpp server). Prefill is modelled as a separate pass; confirm in 0.2."""
+    fields = {
+        "name": "ollama", "version": "0.5.x (llama.cpp server)", "batching": "continuous",
+        "max_seqs": num_parallel, "quant": quant, "kv_bits": 16, "kv_block": 0,
+        "kv_prealloc_ctx": num_ctx, "memory_budget_ratio": 1.0, "workspace_ratio": 0.15,
+        "token_budget": 512, "mixes_prefill": False, "kv_realloc": False,
+        "calibration": _cal("llamacpp", quant),
+    }
+    return EngineProfile(**{**fields, **overrides})
+
+
+def hf(**overrides) -> EngineProfile:
+    """transformers 4.46.x generate() with the model loaded explicitly in bf16; static batching."""
+    quant_name = overrides.pop("quant", None)
+    fields = {
+        "name": "hf", "version": "transformers 4.46.x, explicit bf16 load", "batching": "static",
+        "max_seqs": None, "quant": quant_name, "kv_bits": 16, "kv_block": 0,
+        "kv_prealloc_ctx": None, "memory_budget_ratio": 1.0, "workspace_ratio": 0.20,
+        "token_budget": None, "mixes_prefill": False, "kv_realloc": True,
+        "calibration": _cal("hf", quant_name),
+    }
+    return EngineProfile(**{**fields, **overrides})
+
+
+BUILTIN = {"vllm": vllm, "ollama": ollama, "hf": hf}
+_HF_QUANT_METHODS = {"awq": "awq", "gptq": "gptq", "fp8": "fp8"}
+
+
+def resolve_profile(profile, config: dict | None) -> tuple[EngineProfile, list[str]]:
+    """Name or EngineProfile into a concrete profile; quant is read from config only for a name."""
+    warnings: list[str] = []
+    if isinstance(profile, EngineProfile):
+        p = profile
+    else:
+        if profile not in BUILTIN:
+            raise KeyError(f"unknown profile {profile!r}; built-in: {', '.join(BUILTIN)}")
+        p = BUILTIN[profile]()
+        qc = (config or {}).get("quantization_config")
+        if qc is not None and p.name != "ollama":
+            method = qc.get("quant_method")
+            if method is None:
+                raise ValueError("quantization_config has no quant_method; pass quant explicitly")
+            if method not in _HF_QUANT_METHODS:
+                raise ValueError(f"unsupported quant_method {method!r}; "
+                                 f"supported: {', '.join(_HF_QUANT_METHODS)}")
+            q = _HF_QUANT_METHODS[method]
+            p = dataclasses.replace(p, quant=q, calibration=_cal(p.name, q))
+    if p.quant is not None:
+        warnings.append(f"quant={p.quant!r} sets storage bytes only; "
+                        f"kernel speed comes from the {p.calibration} curve")
+    return p, warnings
