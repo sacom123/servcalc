@@ -1,0 +1,34 @@
+[project]
+name = "servcalc"
+version = "0.1.0"
+description = "Predict single-GPU LLM serving capacity (concurrency, tok/s, TTFT, ITL) from config.json with a roofline model"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = ["vramcalc>=0.1.2"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.optional-dependencies]
+hf = ["vramcalc[hf]"]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+servcalc = "servcalc.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/servcalc"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
