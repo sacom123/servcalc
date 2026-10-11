@@ -8,6 +8,7 @@ QUANTS: dict[str | None, tuple[float, str]] = {
     "fp8": (8, "bf16"),
     "awq": (4, "int4"),
     "gptq": (4, "int4"),
+    "gptq_8": (8, "q8"),
     "gguf_q8_0": (8.5, "q8"),
     "gguf_q6_k": (6.6, "q4"),
     "gguf_q5_k_m": (5.7, "q4"),

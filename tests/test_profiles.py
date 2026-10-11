@@ -2,6 +2,7 @@ import dataclasses
 
 import pytest
 
+from servcalc import GpuSpec, Workload, estimate, quant
 from servcalc.profiles import BUILTIN, hf, ollama, resolve_profile, vllm
 
 
@@ -42,10 +43,32 @@ def test_resolve_by_name_and_quant_from_config():
     p, warns = resolve_profile("vllm", cfg)
     assert p.quant == "awq" and p.calibration == "vllm_int4"
     assert any("storage" in w for w in warns)
-    p2, _ = resolve_profile(vllm(quant=None), cfg)          # explicit profile wins over config
-    assert p2.quant is None
-    p3, _ = resolve_profile("ollama", cfg)           # gguf engines ignore HF quantization_config
+    p2, _ = resolve_profile(vllm(max_seqs=32), cfg)   # unrelated factory args keep config quant
+    assert (p2.quant, p2.calibration, p2.max_seqs) == ("awq", "vllm_int4", 32)
+    p4, _ = resolve_profile(vllm(quant="fp8"), cfg)   # explicit quant wins over config
+    assert p4.quant == "fp8"
+    p3, warns3 = resolve_profile("ollama", cfg)       # gguf engines keep their own format, but say so
     assert p3.quant == "gguf_q4_k_m"
+    assert any("awq" in w and "gguf_q4_k_m" in w for w in warns3)
+
+
+def test_gptq_bits_from_config():
+    p, _ = resolve_profile("vllm", {"quantization_config": {"quant_method": "gptq", "bits": 8}})
+    assert p.quant == "gptq_8" and p.weight_bits == 8
+    p4, _ = resolve_profile("vllm", {"quantization_config": {"quant_method": "gptq"}})
+    assert p4.quant == "gptq" and p4.weight_bits == 4
+    with pytest.raises(ValueError, match="bits"):
+        resolve_profile("vllm", {"quantization_config": {"quant_method": "gptq", "bits": 3}})
+    with pytest.raises(ValueError, match="bits"):
+        resolve_profile("vllm", {"quantization_config": {"quant_method": "awq", "bits": 8}})
+
+
+@pytest.mark.parametrize("engine", sorted(BUILTIN))
+@pytest.mark.parametrize("q", list(quant.QUANTS))
+def test_every_engine_quant_pair_estimates(engine, q, tiny_cfg):
+    e = estimate(tiny_cfg, GpuSpec("t", 10**9, 100.0, 10.0),
+                 workload=Workload(8, 5, concurrency=(1,)), profile=BUILTIN[engine](quant=q))
+    assert e.points[0].itl_ms.mid > 0
 
 
 def test_resolve_rejects_unknown():

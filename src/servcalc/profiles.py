@@ -100,28 +100,63 @@ def hf(**overrides) -> EngineProfile:
 
 
 BUILTIN = {"vllm": vllm, "ollama": ollama, "hf": hf}
-_HF_QUANT_METHODS = {"awq": "awq", "gptq": "gptq", "fp8": "fp8"}
+
+
+def with_quant(p: EngineProfile, quant_name: str | None) -> EngineProfile:
+    """Copy of p with another weight format and the matching calibration family."""
+    engine = p.calibration.rsplit("_", 1)[0]
+    return dataclasses.replace(p, quant=quant_name, calibration=_cal(engine, quant_name))
+
+
+# HF quant_method -> {bits: quant name}
+_HF_QUANT_METHODS = {
+    "awq": {4: "awq"},
+    "gptq": {4: "gptq", 8: "gptq_8"},
+    "fp8": {8: "fp8"},
+}
+_GGUF_ENGINES = ("ollama",)
+
+
+def _config_quant(config: dict | None) -> str | None:
+    """Quant name implied by config.json's quantization_config, or None when absent."""
+    qc = (config or {}).get("quantization_config")
+    if qc is None:
+        return None
+    method = qc.get("quant_method")
+    if method is None:
+        raise ValueError("quantization_config has no quant_method; pass quant explicitly")
+    if method not in _HF_QUANT_METHODS:
+        raise ValueError(f"unsupported quant_method {method!r}; "
+                         f"supported: {', '.join(_HF_QUANT_METHODS)}")
+    by_bits = _HF_QUANT_METHODS[method]
+    bits = qc.get("bits", next(iter(by_bits)))
+    if bits not in by_bits:
+        raise ValueError(f"{method} with bits={bits!r} is not supported; "
+                         f"supported bits: {', '.join(map(str, by_bits))}")
+    return by_bits[bits]
 
 
 def resolve_profile(profile, config: dict | None) -> tuple[EngineProfile, list[str]]:
-    """Name or EngineProfile into a concrete profile; quant is read from config only for a name."""
+    """Name or EngineProfile into a concrete profile.
+
+    Precedence for quant: explicit factory argument > config quantization_config > default.
+    GGUF engines keep their own format and only warn when the config names an HF quant.
+    """
     warnings: list[str] = []
     if isinstance(profile, EngineProfile):
         p = profile
-    else:
-        if profile not in BUILTIN:
-            raise KeyError(f"unknown profile {profile!r}; built-in: {', '.join(BUILTIN)}")
+    elif profile in BUILTIN:
         p = BUILTIN[profile]()
-        qc = (config or {}).get("quantization_config")
-        if qc is not None and p.name != "ollama":
-            method = qc.get("quant_method")
-            if method is None:
-                raise ValueError("quantization_config has no quant_method; pass quant explicitly")
-            if method not in _HF_QUANT_METHODS:
-                raise ValueError(f"unsupported quant_method {method!r}; "
-                                 f"supported: {', '.join(_HF_QUANT_METHODS)}")
-            q = _HF_QUANT_METHODS[method]
-            p = dataclasses.replace(p, quant=q, calibration=_cal(p.name, q))
+    else:
+        raise KeyError(f"unknown profile {profile!r}; built-in: {', '.join(BUILTIN)}")
+    inferred = _config_quant(config)
+    if inferred is not None:
+        if p.name in _GGUF_ENGINES:
+            warnings.append(
+                f"config.json declares {inferred!r} weights but the {p.name} profile models "
+                f"quant={p.quant!r}; pass weight_bytes for the GGUF file you serve")
+        elif p.quant is None:
+            p = with_quant(p, inferred)
     if p.quant is not None:
         warnings.append(f"quant={p.quant!r} sets storage bytes only; "
                         f"kernel speed comes from the {p.calibration} curve")

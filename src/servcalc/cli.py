@@ -41,30 +41,26 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _profile(a: argparse.Namespace):
-    touched = any(v is not None for v in (a.quant, a.kv_bits, a.max_seqs, a.num_ctx,
-                                          a.token_budget)) or a.no_chunked
-    if not touched:
-        return a.engine   # bare name: quant is inferred from the config
-    quant = {"quant": a.quant} if a.quant is not None else {}
-    if a.engine == "vllm":
-        p = profiles.vllm(chunked=not a.no_chunked, **quant)
-    elif a.engine == "ollama":
-        kwargs = dict(quant)
-        if a.max_seqs is not None:
-            kwargs["num_parallel"] = a.max_seqs
-        if a.num_ctx is not None:
-            kwargs["num_ctx"] = a.num_ctx
-        p = profiles.ollama(**kwargs)
-    else:
-        p = profiles.hf(**quant)
+def _profile(a: argparse.Namespace) -> profiles.EngineProfile:
+    """Factory defaults plus CLI overrides; quant left None is inferred from the config later."""
+    if a.num_ctx is not None and a.engine != "ollama":
+        raise ValueError("--num-ctx applies to --engine ollama only")
+    if a.no_chunked and a.engine != "vllm":
+        raise ValueError("--no-chunked applies to --engine vllm only")
+    p = profiles.BUILTIN[a.engine]()
+    if a.quant is not None:
+        p = profiles.with_quant(p, a.quant)
     overrides = {}
     if a.kv_bits is not None:
         overrides["kv_bits"] = a.kv_bits
-    if a.max_seqs is not None and a.engine != "ollama":
+    if a.max_seqs is not None:
         overrides["max_seqs"] = a.max_seqs
+    if a.num_ctx is not None:
+        overrides["kv_prealloc_ctx"] = a.num_ctx
     if a.token_budget is not None:
         overrides["token_budget"] = a.token_budget
+    if a.no_chunked:
+        overrides.update(token_budget=None, mixes_prefill=False)
     return dataclasses.replace(p, **overrides) if overrides else p
 
 

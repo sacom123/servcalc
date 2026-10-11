@@ -23,6 +23,10 @@ SPECS: dict[str, tuple[float, float]] = {
 }
 
 
+_NUMBER_HINT = ("gpu must be a name from the built-in table (see `servcalc gpus`) or a GpuSpec "
+                "with bandwidth and TFLOPs; a bare number ({gpu!r}) cannot be timed")
+
+
 @dataclass(frozen=True)
 class GpuSpec:
     name: str
@@ -42,9 +46,12 @@ def resolve(gpu) -> GpuSpec:
     if isinstance(gpu, GpuSpec):
         return gpu
     if not isinstance(gpu, str):
-        raise ValueError(  # noqa: TRY004
-            "gpu must be a name from the built-in table or a GpuSpec with bandwidth and TFLOPs; "
-            f"a bare number ({gpu!r}) cannot be timed")
-    name, vram = _vg.lookup(gpu)
+        raise ValueError(_NUMBER_HINT.format(gpu=gpu))  # noqa: TRY004
+    try:
+        name, vram = _vg.lookup(gpu)
+    except KeyError:
+        if gpu.strip().replace(".", "", 1).isdigit():
+            raise ValueError(_NUMBER_HINT.format(gpu=gpu)) from None
+        raise
     bw, tf = SPECS[name]
     return GpuSpec(name, vram, float(bw), float(tf))

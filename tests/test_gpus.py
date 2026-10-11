@@ -34,3 +34,8 @@ def test_gpuspec_validation(field, value):
     kwargs = {"name": "x", "vram_bytes": 1, "bandwidth_gbs": 1.0, "bf16_tflops": 1.0, field: value}
     with pytest.raises(ValueError, match=field):
         GpuSpec(**kwargs)
+
+
+def test_resolve_numeric_string_rejected_with_hint():
+    with pytest.raises(ValueError, match="servcalc gpus"):
+        resolve("24")

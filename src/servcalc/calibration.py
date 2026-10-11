@@ -77,10 +77,15 @@ PRIORS: dict[str, Calibration] = {
     "hf_bf16": _prior(((0.4, 0.6), (0.5, 0.7), (0.5, 0.7), (0.5, 0.7)),
                       ((0.02, 0.05), (0.1, 0.2), (0.25, 0.4), (0.3, 0.45)), (3, 8)),
 }
+# Every (engine, quant family) a factory can name resolves here. Families: bf16, int4, q4, q8.
 PRIORS["llamacpp_q8"] = PRIORS["llamacpp_q4"]
+PRIORS["llamacpp_bf16"] = PRIORS["llamacpp_q4"]
+PRIORS["llamacpp_int4"] = PRIORS["llamacpp_q4"]
 PRIORS["vllm_q4"] = PRIORS["vllm_int4"]
 PRIORS["vllm_q8"] = PRIORS["vllm_bf16"]
 PRIORS["hf_int4"] = PRIORS["vllm_int4"]
+PRIORS["hf_q4"] = PRIORS["vllm_int4"]
+PRIORS["hf_q8"] = PRIORS["hf_bf16"]
 
 
 def get(name: str) -> Calibration:

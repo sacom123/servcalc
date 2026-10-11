@@ -110,3 +110,23 @@ def test_max_seqs_and_memory_reasons(tiny):
     small = GpuSpec("s", 220_000, 1.0, 0.001)             # usable = 220000 - 213632 - 22000 < 0
     with pytest.raises(DoesNotFitError):
         capacity(small, WTS.resident, 256, W, p)
+
+
+def test_continuous_unmixed_tied_skips_lm_head_on_non_last_chunks(tiny_cfg):
+    from vramcalc import Arch
+
+    from servcalc import work
+    tied = Arch.from_config({**tiny_cfg, "tie_word_embeddings": True})
+    wts = work.weight_bytes(tied, 16)              # stream == resident == 213632 - 32768
+    fast = GpuSpec("fast", 1_000_000, 1.0, 1.0)    # 1 TFLOP/s: every step is memory-bound
+    p = prof(mixes_prefill=False, token_budget=6)
+    cap = capacity(fast, wts.resident, 256, W, p)
+    b = point(2, tied, fast, W, p, CAL, wts, 256, cap)
+
+    def mem_ms(bytes_):
+        return bytes_ / (1e9 * 0.5) * 1000 + 1.0
+
+    s_d = mem_ms(wts.stream + 256 * (2 * 10.5 + 2))
+    first = mem_ms(wts.stream - 32_768 + 256 * 6)   # no lm_head on a non-last chunk, tied or not
+    last = mem_ms(wts.stream + 256 * 8)
+    assert math.isclose(b.itl_ms.mid, s_d + 0.5 * (first + last))

@@ -348,7 +348,7 @@ total_tok_s = N × 1000 / ITL                               # decode 출력만. 
 
 팩토리: `vllm(chunked=True, **overrides)`, `ollama(num_parallel=4, num_ctx=2048, quant="gguf_q4_k_m", **overrides)`, `hf(**overrides)`. 모두 frozen dataclass를 반환하고 `dataclasses.replace`로 바꿀 수 있습니다. `profile="ollama"`처럼 문자열이면 기본 팩토리를 호출합니다.
 
-`quant.py` 테이블: `None → 16`, `fp8 → 8`, `awq → 4`, `gptq → config bits (기본 4)`, `gguf_q8_0 → 8.5`, `gguf_q6_k → 6.6`, `gguf_q5_k_m → 5.7`, `gguf_q4_k_m → 4.9`, `gguf_q4_0 → 4.5`. 각 항목에 보정 곡선 이름이 붙습니다. 목록 밖 문자열은 `ValueError`.
+`quant.py` 테이블: `None → 16`, `fp8 → 8`, `awq → 4`, `gptq → 4`, `gptq_8 → 8`(config `bits`가 8이면 선택, 그 외 값은 `ValueError`), `gguf_q8_0 → 8.5`, `gguf_q6_k → 6.6`, `gguf_q5_k_m → 5.7`, `gguf_q4_k_m → 4.9`, `gguf_q4_0 → 4.5`. 각 항목에 보정 곡선 이름이 붙습니다. 목록 밖 문자열은 `ValueError`.
 
 ## 9. CLI (`cli.py`)
 

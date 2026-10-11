@@ -154,10 +154,10 @@ def _continuous(n, arch, gpu, workload, profile, cal, wts, kv_tok, cap) -> Batch
         m = math.ceil(lam * k)
     else:
         chunks = work.prefill_chunks(plen, profile.token_budget)
-        lm_head = 0 if arch.tie_word_embeddings else 2 * arch.embed_params()
+        lm_head = 2 * arch.embed_params()   # read only on the chunk that emits the token
         parts = []
         for clen, c0, last in chunks:
-            wread = wts.stream - (0 if last else lm_head)
+            wread = max(0, wts.stream - (0 if last else lm_head))
             parts.append(step_time(Work(float(wread), 0.0)
                                    + work.prefill_chunk(arch, clen, c0, last, kv_tok),
                                    gpu, cal, clen).ms)
